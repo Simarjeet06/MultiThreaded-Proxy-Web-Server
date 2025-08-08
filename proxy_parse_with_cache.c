@@ -1,4 +1,5 @@
 #include "proxy_parse.h"
+#include "proxy_parse.c"
 #include<stdio.h>
 #include<string.h>
 #include<time.h>
@@ -38,6 +39,68 @@ pthread_mutex_t lock;
 
 cached_element* head;
 int cache_size;
+
+int connectRemoteServer(char* host_addr, int port_num){
+    int remoteSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if(remoteSocket < 0){
+        perror("Error creating socket");
+        return -1;
+    }
+    struct sockaddr_in server_addr;
+    remoteSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if(remoteSocket < 0){
+        perror("Error creating socket");
+        return -1;
+    }
+struct hostent* host=gethostbyname(host_addr);
+    if(host == NULL){
+        perror("NO such host exists\n");
+        return -1;
+    }
+    struct sockaddr_in server_addr;
+    bzero((char*)&server_addr, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(port_num);
+
+    bcopy((char*)&host->h_addr, (char*)&server_addr.sin_addr.s_addr, host->h_length);
+    if(connect(remoteSocket, (struct sockaddr*)&server_addr, (size_t)sizeof(server_addr)) < 0){
+        perror("Error connecting to remote server");
+        return -1;
+    }
+    return remoteSocket;
+}
+
+int handle_request(int clientSocketId, ParsedRequest* request, char* tempReq){
+        char* buf=(char*)malloc(MAX_BYTES * sizeof(char));
+        bzero(buf, MAX_BYTES);
+        strcpy(buf,"GET");
+        strcat(buf, request->path);
+        strcat(buf," ");
+        strcat(buf,request->version);
+        strcat(buf, "\r\n");
+
+        size_t len = strlen(buf);
+
+        if(ParsedHeader_set(request,"Connection","close")<0){
+            printf("set header key is not working");
+        }
+        if(ParsedHeader_get(request, "Host") == NULL){
+            if(ParsedHeader_set(request, "Host", request->host) < 0){
+                printf("set host header key is not working");
+            }
+        }
+
+        if(ParsedRequest_unparse_headers(request, buf + len, (size_t)MAX_BYTES - len) < 0){
+            printf("unparse headers failed\n");
+        }
+        int server_port = 80;
+        if(request->port != NULL){
+            server_port = atoi(request->port);
+        }
+        int remoteSocketId=connectRemoteServer(request->host, server_port);
+       
+
+}
 
 void *thread_fn(void* socketNew){
     sem_wait(&semaphore);
@@ -119,7 +182,7 @@ printf("Semaphore post value is :%d\n", p);
 free(tempReq);
 return NULL;
 }
-
+}
 int main(int argc,char* argv[]){
     int client_socketId,client_len;
     struct sockaddr_in server_addr,client_addr;
@@ -181,4 +244,5 @@ int main(int argc,char* argv[]){
 close(proxy_socketId);
     return 0;   
 }
+
 
