@@ -6,6 +6,7 @@
 #include<pthread.h>
 #include<unistd.h>
 #include<sys/socket.h>
+#include<netdb.h>
 #include<netinet/in.h>
 #include<arpa/inet.h>
 #include<sys/types.h>
@@ -46,12 +47,6 @@ int connectRemoteServer(char* host_addr, int port_num){
         perror("Error creating socket");
         return -1;
     }
-    struct sockaddr_in server_addr;
-    remoteSocket = socket(AF_INET, SOCK_STREAM, 0);
-    if(remoteSocket < 0){
-        perror("Error creating socket");
-        return -1;
-    }
 struct hostent* host=gethostbyname(host_addr);
     if(host == NULL){
         perror("NO such host exists\n");
@@ -61,8 +56,8 @@ struct hostent* host=gethostbyname(host_addr);
     bzero((char*)&server_addr, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(port_num);
-
-    bcopy((char*)&host->h_addr, (char*)&server_addr.sin_addr.s_addr, host->h_length);
+    // bcopy((char*)&host->h_addr , (char*)&server_addr.sin_addr.s_addr, host->h_length);
+    bcopy(host->h_addr, &server_addr.sin_addr.s_addr, host->h_length);
     if(connect(remoteSocket, (struct sockaddr*)&server_addr, (size_t)sizeof(server_addr)) < 0){
         perror("Error connecting to remote server");
         return -1;
@@ -98,8 +93,39 @@ int handle_request(int clientSocketId, ParsedRequest* request, char* tempReq){
             server_port = atoi(request->port);
         }
         int remoteSocketId=connectRemoteServer(request->host, server_port);
-       
+        if(remoteSocketId < 0){
+            printf("Error connecting to remote server\n");
+            return -1;
+        }
 
+        int bytes_send_server = send(remoteSocketId, buf, strlen(buf), 0);
+        bzero(buf, MAX_BYTES);
+
+        bytes_send_server = recv(remoteSocketId, buf, MAX_BYTES, 0);
+        char* temp_buffer=(char*)malloc(sizeof(char)* MAX_BYTES);
+        int temp_buffer_size=MAX_BYTES;
+        int temp_buffer_index=0;
+        while(bytes_send_server > 0){
+            bytes_send_server = send(clientSocketId, buf, bytes_send_server, 0);
+            for(int i=0;i<bytes_send_server/sizeof(char);i++){
+                temp_buffer[temp_buffer_index++]=buf[i];
+            }
+            temp_buffer_size+=MAX_BYTES;
+            temp_buffer=(char*)realloc(temp_buffer, sizeof(char)*temp_buffer_size);
+            if(bytes_send_server < 0){
+                perror("Error sending data to client\n");
+                break;
+            }
+            bzero(buf, MAX_BYTES);
+            bytes_send_server = recv(remoteSocketId, buf, MAX_BYTES, 0);
+            
+}
+temp_buffer[temp_buffer_index]='\0';
+        free(buf);
+        add_cached_element(temp_buffer, strlen(temp_buffer), tempReq);
+        free(temp_buffer);
+        close(remoteSocketId);
+        return 0;
 }
 
 void *thread_fn(void* socketNew){
@@ -128,7 +154,7 @@ void *thread_fn(void* socketNew){
        }
         cached_element* temp=find(tempReq);
         if(temp!=NULL){
-            int size=temp->len/sizeof(char);
+            int size=(temp->len)/sizeof(char);
             int pos=0;
             char response[MAX_BYTES];
             while(pos<size){
@@ -161,8 +187,6 @@ void *thread_fn(void* socketNew){
         else{
             sendErrorMessage(socket, 500);
         }
-        
-
     }
     else{
         printf("This code only supports GET requests\n");
@@ -177,7 +201,7 @@ shutdown(socket, SHUT_RDWR);
 close(socket);
 free(buffer);
 sem_post(&semaphore);
-sem_getvalue(&semaphore, &p);
+sem_getvalue(&semaphore,p);
 printf("Semaphore post value is :%d\n", p);
 free(tempReq);
 return NULL;
@@ -224,7 +248,7 @@ int main(int argc,char* argv[]){
         bzero((char*)&client_addr, sizeof(client_addr));
         client_len = sizeof(client_addr);
         client_socketId = accept(proxy_socketId, (struct sockaddr*)&client_addr,(socklen_t*)&client_len);
-        if(client_socketId < 0){
+        if(client_socketId < 0){ 
             perror("Not able to accept client connection");
             exit(1);
         }
